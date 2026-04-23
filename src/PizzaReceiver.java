@@ -15,12 +15,16 @@ import java.nio.charset.StandardCharsets;
  * Last Date Changed:
  * Rev:
  */
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rabbitmq.client.*;
+
 public class PizzaReceiver {
 
     private final static String FLAT_QUEUE = "pizzaFlatQueue";
     private final static String JSON_QUEUE = "pizzaJsonQueue";
+    private final static String SECRET_KEY = "secret key";
 
-    public static void main(String[] argv) throws Exception {
+    public static void main(String[] args) throws Exception {
 
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("localhost");
@@ -33,22 +37,63 @@ public class PizzaReceiver {
 
         System.out.println("Waiting for messages...");
 
-        DeliverCallback flatDeliverCallback = (consumerTag, delivery) -> {
-            String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-            System.out.println("Received flat file message: " + message);
+        DeliverCallback flatCallback = (consumerTag, delivery) -> {
+            try {
+                String payload = new String(delivery.getBody(), "UTF-8");
+
+                String[] parts = payload.split("\\|\\|HMAC\\|\\|");
+                String receivedMessage = parts[0];
+                String receivedHmac = parts[1];
+
+                String generatedHmac = HmacUtil.generateHMAC(receivedMessage, SECRET_KEY);
+
+                System.out.println("\n========== RECEIVER FLAT ==========");
+                System.out.println("Message received:   " + receivedMessage);
+                System.out.println("HMAC received:      " + receivedHmac);
+                System.out.println("HMAC generated:     " + generatedHmac);
+
+                if (receivedHmac.equals(generatedHmac)) {
+                    System.out.println("Integrity Check: PASSED");
+                } else {
+                    System.out.println("Integrity Check: FAILED");
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         };
 
-        DeliverCallback jsonDeliverCallback = (consumerTag, delivery) -> {
-            String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+        DeliverCallback jsonCallback = (consumerTag, delivery) -> {
+            try {
+                String payload = new String(delivery.getBody(), "UTF-8");
 
-            ObjectMapper mapper = new ObjectMapper();
-            Pizza pizza = mapper.readValue(message, Pizza.class);
+                String[] parts = payload.split("\\|\\|HMAC\\|\\|");
+                String receivedMessage = parts[0];
+                String receivedHmac = parts[1];
 
-            System.out.println("Received JSON message: " + message);
-            System.out.println("Pizza object from JSON: " + pizza);
+                String generatedHmac = HmacUtil.generateHMAC(receivedMessage, SECRET_KEY);
+
+                System.out.println("\n========== RECEIVER JSON ==========");
+                System.out.println("Message received:   " + receivedMessage);
+                System.out.println("HMAC received:      " + receivedHmac);
+                System.out.println("HMAC generated:     " + generatedHmac);
+
+                if (receivedHmac.equals(generatedHmac)) {
+                    System.out.println("Integrity Check: PASSED");
+                } else {
+                    System.out.println("Integrity Check: FAILED");
+                }
+
+                ObjectMapper mapper = new ObjectMapper();
+                Pizza pizza = mapper.readValue(receivedMessage, Pizza.class);
+                System.out.println("JSON converted back to Pizza object: " + pizza);
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         };
 
-        channel.basicConsume(FLAT_QUEUE, true, flatDeliverCallback, consumerTag -> { });
-        channel.basicConsume(JSON_QUEUE, true, jsonDeliverCallback, consumerTag -> { });
+        channel.basicConsume(FLAT_QUEUE, true, flatCallback, consumerTag -> { });
+        channel.basicConsume(JSON_QUEUE, true, jsonCallback, consumerTag -> { });
     }
 }
